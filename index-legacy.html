@@ -1,0 +1,439 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Prep Master</title>
+  <script src="https://cdn.tailwindcss.com/3.4.17"></script>
+  <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+  <style>
+    html,body{background:#fff;color:#111827}
+    *{box-sizing:border-box}
+    body{font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+    .hide-scrollbar::-webkit-scrollbar{display:none}.hide-scrollbar{scrollbar-width:none}
+    .shadow-soft{box-shadow:0 8px 28px rgba(15,23,42,.08)}
+    .line-clamp-2{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+    .bottom-safe{padding-bottom:92px}
+  </style>
+</head>
+<body>
+<div id="app" class="min-h-screen bg-white"></div>
+
+<script>
+/*
+  PREP MASTER — standalone frontend
+  ------------------------------------------------------------
+  IMPORTANT:
+  1) Put your own logo URL in CONFIG.LOGO_URL.
+  2) Put your own authorized batch/content API behind CONFIG.API_BASE.
+  3) Do not hard-code a single lecture .m3u8 URL. Your server/API
+     should return the playback URL for the selected authorized lecture.
+*/
+
+const CONFIG = {
+  APP_NAME: "Prep Master",
+  LOGO_URL: "", // <-- put your 2-photo logo URL here
+  TELEGRAM_URL: "https://t.me/prepmaster0",
+
+  // For a production Vercel app, point this to YOUR backend/API.
+  API_BASE: "/api",
+
+  // Set true if you want to use demo cards while wiring your API.
+  DEMO_MODE: true
+};
+
+const demoBatches = [
+  {
+    id: 101,
+    title: "Commerce 12th - PRARAMBH 2.0 (2026-27)",
+    subtitle: "Class 12 Commerce",
+    thumbnail: "",
+    isNew: true
+  },
+  {
+    id: 103,
+    title: "Class 10 Board Preparation",
+    subtitle: "Complete Study Batch",
+    thumbnail: "",
+    isNew: false
+  },
+  {
+    id: 105,
+    title: "Foundation Batch",
+    subtitle: "Concept + Practice",
+    thumbnail: "",
+    isNew: false
+  }
+];
+
+let batches = [];
+let activeTab = "batches";
+let selectedBatch = null;
+let selectedFolder = null;
+let selectedLecture = null;
+let enrolled = JSON.parse(localStorage.getItem("pm_enrolled") || "[]");
+
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c =>
+  ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c]));
+
+function logoHTML(size="h-11 w-11") {
+  return CONFIG.LOGO_URL
+    ? `<img src="${esc(CONFIG.LOGO_URL)}" class="${size} rounded-2xl object-cover" alt="Prep Master">`
+    : `<div class="${size} rounded-2xl bg-slate-900 text-white grid place-items-center font-black text-sm">PM</div>`;
+}
+
+function isEnrolled(id){ return enrolled.includes(String(id)); }
+
+function saveEnroll(){ localStorage.setItem("pm_enrolled", JSON.stringify(enrolled)); }
+
+function renderShell(content) {
+  document.getElementById("app").innerHTML = `
+    <div class="max-w-6xl mx-auto min-h-screen">
+      <header class="sticky top-0 z-30 bg-white/95 backdrop-blur border-b border-slate-100">
+        <div class="px-4 sm:px-6 py-3 flex items-center gap-3">
+          ${logoHTML()}
+          <div class="min-w-0 flex-1">
+            <div class="text-lg sm:text-xl font-extrabold tracking-tight">Prep Master</div>
+            <div class="text-xs text-slate-500">Learn smarter. Grow faster.</div>
+          </div>
+          <button onclick="openTelegram()" class="rounded-xl border border-slate-200 px-3 py-2 text-sm font-semibold hover:bg-slate-50">
+            Join Telegram
+          </button>
+        </div>
+      </header>
+      ${content}
+      <nav class="fixed bottom-0 left-0 right-0 z-40 bg-white/95 backdrop-blur border-t border-slate-200">
+        <div class="max-w-6xl mx-auto grid grid-cols-2">
+          <button onclick="switchTab('my')" class="py-3 ${activeTab==='my'?'text-slate-900':'text-slate-400'}">
+            <div class="text-xl">📖</div><div class="text-xs font-bold">My Batches</div>
+          </button>
+          <button onclick="switchTab('batches')" class="py-3 ${activeTab==='batches'?'text-slate-900':'text-slate-400'}">
+            <div class="text-xl">📚</div><div class="text-xs font-bold">Batches</div>
+          </button>
+        </div>
+      </nav>
+    </div>`;
+}
+
+function batchCard(b) {
+  const enrolledNow = isEnrolled(b.id);
+  const img = b.thumbnail
+    ? `<img src="${esc(b.thumbnail)}" class="w-full aspect-[16/9] object-cover" alt="">`
+    : `<div class="w-full aspect-[16/9] bg-gradient-to-br from-slate-100 to-slate-200 grid place-items-center text-4xl">📚</div>`;
+  return `
+    <article class="bg-white rounded-3xl border border-slate-200 overflow-hidden shadow-soft">
+      ${img}
+      <div class="p-4">
+        ${b.isNew ? `<span class="inline-flex rounded-full bg-slate-900 text-white px-2.5 py-1 text-[10px] font-extrabold mb-2">NEW</span>` : ""}
+        <h3 class="font-extrabold text-[16px] leading-5 line-clamp-2">${esc(b.title)}</h3>
+        <p class="text-xs text-slate-500 mt-1">${esc(b.subtitle || "Study batch")}</p>
+        <div class="grid grid-cols-2 gap-2 mt-4">
+          <button onclick="enrollBatch(${Number(b.id)})"
+            class="rounded-xl bg-slate-900 text-white py-2.5 text-xs font-extrabold">
+            ${enrolledNow ? "ENROLLED ✓" : "+ ENROLL"}
+          </button>
+          <button onclick="studyBatch(${Number(b.id)})"
+            class="rounded-xl border border-slate-200 py-2.5 text-xs font-extrabold text-slate-800">
+            LET'S STUDY →
+          </button>
+        </div>
+      </div>
+    </article>`;
+}
+
+async function loadBatches() {
+  if (CONFIG.DEMO_MODE) {
+    batches = demoBatches;
+    renderHome();
+    return;
+  }
+
+  try {
+    const res = await fetch(`${CONFIG.API_BASE}/batches`, {headers:{Accept:"application/json"}});
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const json = await res.json();
+    // Adapt this mapper to your authorized batches API.
+    batches = Array.isArray(json) ? json : (json.data || []);
+    renderHome();
+  } catch (e) {
+    batches = [];
+    renderHome(`<div class="p-6 text-center text-red-600">Unable to load batches.</div>`);
+  }
+}
+
+function renderHome(extra="") {
+  const source = activeTab === "my"
+    ? batches.filter(b => isEnrolled(b.id))
+    : batches;
+
+  renderShell(`
+    <main class="px-4 sm:px-6 pt-5 bottom-safe">
+      <section class="mb-5">
+        <div class="rounded-3xl bg-slate-50 border border-slate-200 p-5">
+          <div class="flex items-center gap-3">
+            ${logoHTML("h-14 w-14")}
+            <div>
+              <p class="text-xs font-bold text-slate-500 uppercase tracking-wider">Welcome to</p>
+              <h1 class="text-2xl font-black">Prep Master</h1>
+            </div>
+          </div>
+          <div class="mt-4">
+            <input id="search" oninput="filterCards()" placeholder="Search batches..."
+              class="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 outline-none focus:ring-2 focus:ring-slate-200">
+          </div>
+        </div>
+      </section>
+
+      <div class="flex items-center justify-between mb-3">
+        <h2 class="text-xl font-black">${activeTab === "my" ? "My Batches" : "All Batches"}</h2>
+        <span class="text-xs font-semibold text-slate-400">${source.length} batches</span>
+      </div>
+
+      <div id="batchGrid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+        ${source.length ? source.map(batchCard).join("") :
+          `<div class="sm:col-span-2 lg:col-span-3 text-center py-16 text-slate-400">
+             ${activeTab === "my" ? "You haven't enrolled in any batch yet." : "No batches found."}
+           </div>`}
+      </div>
+      ${extra}
+    </main>`);
+}
+
+function filterCards(){
+  const q = (document.getElementById("search")?.value || "").toLowerCase();
+  document.querySelectorAll("#batchGrid article").forEach(card => {
+    card.style.display = card.innerText.toLowerCase().includes(q) ? "" : "none";
+  });
+}
+
+function switchTab(tab){
+  activeTab = tab;
+  renderHome();
+}
+
+function enrollBatch(id){
+  if (!enrolled.includes(String(id))) {
+    enrolled.push(String(id));
+    saveEnroll();
+  }
+
+  Swal.fire({
+    title: "Congratulations 🎉",
+    text: "You’re successfully enrolled in this batch. You can now find it anytime in My Batches and continue your learning journey.",
+    icon: "success",
+    confirmButtonText: "Continue",
+    confirmButtonColor: "#111827",
+    background: "#fff",
+    color: "#111827",
+    customClass: {popup:"rounded-3xl"}
+  }).then(() => renderHome());
+}
+
+function openTelegram(){
+  window.open(CONFIG.TELEGRAM_URL, "_blank", "noopener,noreferrer");
+}
+
+async function studyBatch(id){
+  const b = batches.find(x => Number(x.id) === Number(id));
+  selectedBatch = b || {id};
+
+  // This intentionally calls YOUR authorized backend adapter.
+  // Do not put a third-party secret or protected stream URL in the browser.
+  if (CONFIG.DEMO_MODE) {
+    showStudyPage(selectedBatch, [
+      {id: 1, title: "Sample Folder", count: 3},
+      {id: 2, title: "Practice & Notes", count: 2}
+    ]);
+    return;
+  }
+
+  try {
+    const data = await fetchJSON(`${CONFIG.API_BASE}/batches/${encodeURIComponent(id)}/overview`);
+    showStudyPage(selectedBatch, normalizeFolders(data));
+  } catch {
+    Swal.fire({icon:"error",title:"Unable to open batch",text:"Please try again later.",confirmButtonColor:"#111827"});
+  }
+}
+
+function normalizeFolders(json){
+  // Adapt to your authorized API's exact response shape.
+  return json?.data || json?.folders || [];
+}
+
+function showStudyPage(batch, folders){
+  document.getElementById("app").innerHTML = `
+    <div class="max-w-4xl mx-auto min-h-screen bg-white">
+      <header class="sticky top-0 z-20 bg-white/95 backdrop-blur border-b border-slate-100">
+        <div class="px-4 py-3 flex items-center gap-3">
+          <button onclick="renderHome()" class="h-10 w-10 rounded-xl border border-slate-200">←</button>
+          ${logoHTML("h-10 w-10")}
+          <div class="min-w-0">
+            <h1 class="font-black truncate">${esc(batch.title)}</h1>
+            <p class="text-xs text-slate-500">Batch ID: ${esc(batch.id)}</p>
+          </div>
+        </div>
+      </header>
+      <main class="p-4 pb-10">
+        <div class="rounded-3xl bg-slate-50 border border-slate-200 p-5 mb-4">
+          <h2 class="font-black text-lg">📚 Course Content</h2>
+          <p class="text-sm text-slate-500 mt-1">Open a folder to view its authorized content.</p>
+        </div>
+        <div class="space-y-3">
+          ${folders.map(f => `
+            <button onclick="openFolder(${Number(f.id)})"
+              class="w-full text-left bg-white border border-slate-200 rounded-2xl p-4 flex items-center gap-3 hover:bg-slate-50">
+              <div class="h-11 w-11 rounded-xl bg-slate-100 grid place-items-center">📁</div>
+              <div class="flex-1">
+                <div class="font-extrabold">${esc(f.title || f.name || "Folder")}</div>
+                <div class="text-xs text-slate-500">${esc(f.count ?? f.total ?? "")} items</div>
+              </div>
+              <span>›</span>
+            </button>`).join("")}
+        </div>
+      </main>
+    </div>`;
+}
+
+async function openFolder(folderId){
+  if (CONFIG.DEMO_MODE) {
+    showLectures([
+      {id: 22001,title:"Introduction Lecture",locked:false},
+      {id: 22002,title:"Chapter 1",locked:false},
+      {id: 22003,title:"Chapter 2",locked:true}
+    ]);
+    return;
+  }
+
+  try {
+    const data = await fetchJSON(`${CONFIG.API_BASE}/batches/${encodeURIComponent(selectedBatch.id)}/folders/${encodeURIComponent(folderId)}/content`);
+    showLectures(normalizeLectures(data));
+  } catch {
+    Swal.fire({icon:"error",title:"Unable to load folder",confirmButtonColor:"#111827"});
+  }
+}
+
+function normalizeLectures(json){
+  return json?.data || json?.items || [];
+}
+
+function showLectures(lectures){
+  document.getElementById("app").innerHTML = `
+    <div class="max-w-4xl mx-auto min-h-screen bg-white">
+      <header class="sticky top-0 z-20 bg-white/95 backdrop-blur border-b border-slate-100">
+        <div class="px-4 py-3 flex items-center gap-3">
+          <button onclick="studyBatch(${Number(selectedBatch.id)})" class="h-10 w-10 rounded-xl border border-slate-200">←</button>
+          <div class="font-black">Lectures</div>
+        </div>
+      </header>
+      <main class="p-4">
+        <div class="space-y-3">
+          ${lectures.map(l => `
+            <button onclick="openLecture(${Number(l.id || l.entity_id)})"
+              class="w-full text-left border border-slate-200 rounded-2xl p-4 flex items-center gap-3">
+              <div class="h-11 w-11 rounded-xl bg-slate-100 grid place-items-center">${l.locked || l.is_locked ? "🔒" : "▶️"}</div>
+              <div class="flex-1">
+                <div class="font-extrabold">${esc(l.title || "Lecture")}</div>
+                <div class="text-xs text-slate-500">${l.duration ? esc(l.duration) : "Video lesson"}</div>
+              </div>
+              <span>›</span>
+            </button>`).join("")}
+        </div>
+      </main>
+    </div>`;
+}
+
+async function openLecture(lectureId){
+  // IMPORTANT: playback URL must come from your authorized backend.
+  // The browser should receive only a URL the current user is allowed to play.
+  if (CONFIG.DEMO_MODE) {
+    Swal.fire({
+      title:"Player ready",
+      text:"Connect your authorized content-details endpoint to load the lecture playback URL.",
+      icon:"info",
+      confirmButtonColor:"#111827"
+    });
+    return;
+  }
+
+  try {
+    const data = await fetchJSON(
+      `${CONFIG.API_BASE}/content/${encodeURIComponent(lectureId)}/playback?course_id=${encodeURIComponent(selectedBatch.id)}`
+    );
+
+    const streamUrl = data?.streamUrl || data?.playbackUrl;
+    const title = data?.title || "Lecture";
+
+    if (!streamUrl) throw new Error("No authorized playback URL returned.");
+
+    // Never hard-code a stream URL for every lecture.
+    showPlayer(streamUrl, title);
+  } catch {
+    Swal.fire({
+      icon:"error",
+      title:"Playback unavailable",
+      text:"This lecture may be locked, expired, or unavailable.",
+      confirmButtonColor:"#111827"
+    });
+  }
+}
+
+function showPlayer(streamUrl, title){
+  // This is intentionally a safe placeholder player screen.
+  // For HLS, use a player library in your own authorized environment.
+  document.getElementById("app").innerHTML = `
+    <div class="max-w-5xl mx-auto min-h-screen bg-black text-white">
+      <header class="p-3 flex items-center gap-3 bg-black">
+        <button onclick="renderHome()" class="h-10 w-10 rounded-xl bg-white/10">←</button>
+        <div class="font-bold truncate">${esc(title)}</div>
+      </header>
+      <main class="p-3">
+        <div class="aspect-video rounded-2xl bg-slate-900 grid place-items-center">
+          <div class="text-center px-6">
+            <div class="text-4xl mb-3">▶️</div>
+            <p class="font-bold">Authorized HLS player</p>
+            <p class="text-xs text-slate-400 mt-1">Connect your approved player implementation here.</p>
+          </div>
+        </div>
+      </main>
+    </div>`;
+}
+
+async function fetchJSON(url){
+  const r = await fetch(url,{headers:{Accept:"application/json"}});
+  if(!r.ok) throw new Error(`HTTP ${r.status}`);
+  return r.json();
+}
+
+function showWelcomePopup(){
+  if(localStorage.getItem("pm_telegram_seen")==="1") return;
+  setTimeout(() => {
+    Swal.fire({
+      html: `
+        <div class="text-center">
+          ${logoHTML("h-20 w-20 mx-auto")}
+          <h2 class="text-2xl font-black mt-4">Welcome to Prep Master</h2>
+          <p class="text-sm text-slate-500 mt-2">
+            Latest updates, announcements aur important information ke liye
+            hamare Telegram channel se connected rahiye.
+          </p>
+        </div>`,
+      showCancelButton:true,
+      confirmButtonText:"JOIN TELEGRAM",
+      cancelButtonText:"I UNDERSTAND, CONTINUE",
+      confirmButtonColor:"#111827",
+      background:"#fff",
+      color:"#111827",
+      customClass:{popup:"rounded-3xl"}
+    }).then(r => {
+      if(r.isConfirmed) openTelegram();
+      localStorage.setItem("pm_telegram_seen","1");
+    });
+  }, 500);
+}
+
+renderHome();
+loadBatches();
+showWelcomePopup();
+</script>
+</body>
+</html>

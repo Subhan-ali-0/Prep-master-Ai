@@ -1,0 +1,2 @@
+export const dynamic='force-dynamic';
+export async function GET(req,{params}){const {id}=await params;const base=process.env.CONTENT_API_BASE||'https://nt.studybeepro.site/api/nig';const url=`${base}?overview=${encodeURIComponent(id)}&_t=${Date.now()}`;const r=await fetch(url,{cache:'no-store',headers:{Accept:'application/json',...(process.env.UPSTREAM_API_KEY?{'Authorization':`Bearer ${process.env.UPSTREAM_API_KEY}`}:{})}});const body=await r.text();return new Response(body,{status:r.status,headers:{'content-type':r.headers.get('content-type')||'application/json'}})}
